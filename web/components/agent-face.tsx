@@ -42,8 +42,25 @@ function ParticleFace({ emotion }: { emotion: Emotion }) {
   // Mutable simulation state
   const sim = useMemo(() => {
     const initial = buildTargets('neutral')
+
+    // Start scattered so the face ASSEMBLES out of dust on first paint instead
+    // of snapping into existence. The per-frame lerp toward the targets already
+    // does the work — it just needed somewhere to travel from. Costs nothing:
+    // no spinner, no extra state, and it reads as the plant waking up.
+    const scattered = Float32Array.from(initial.positions)
+    for (let i = 0; i < TOTAL; i++) {
+      const idx = i * 3
+      const u = Math.random() * 2 - 1
+      const theta = Math.random() * Math.PI * 2
+      const s = Math.sqrt(1 - u * u)
+      const r = 4.5 + Math.random() * 3.5
+      scattered[idx] = s * Math.cos(theta) * r
+      scattered[idx + 1] = u * r
+      scattered[idx + 2] = s * Math.sin(theta) * r - 1
+    }
+
     return {
-      current: Float32Array.from(initial.positions),
+      current: scattered,
       currentColors: Float32Array.from(initial.colors),
       targetPos: initial.positions,
       targetCol: initial.colors,

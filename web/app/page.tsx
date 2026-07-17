@@ -56,12 +56,22 @@ const POST_EVERY_SIM_HOURS = 0.5
  */
 const DEMO_DEVICE = 'dev_plantfaces_simulator'
 
-const OFFLINE: MoodResult = {
-  emotion: 'glitch',
+/**
+ * The boot state, before the first reading has been scored.
+ *
+ * ⚠ This used to be `glitch` — and `glitch` is an ALARM ("SIGNAL LOST", X'd-out
+ * eyes, "Am I still here?"). It means the probe went silent. Using it as a
+ * loading state fired that alarm on every single page load, so the first thing
+ * anyone saw was a plant reporting a fault that was not happening. An alarm that
+ * cries wolf on boot is an alarm people learn to ignore. "I have not computed
+ * yet" is not "the probe is dead" — say the true thing.
+ */
+const BOOTING: MoodResult = {
+  emotion: 'neutral',
   wellbeing: 0,
   comfort: 0,
-  headline: 'Am I still here?',
-  reason: 'No readings yet — waiting for the probe to say something.',
+  headline: 'Waking up…',
+  reason: 'Reading the soil.',
   notes: [],
 }
 
@@ -74,7 +84,6 @@ export default function Page() {
   // the prerendered HTML and the browser — a hydration mismatch (React #418).
   // The HUD is the only time-dependent surface, so it waits for the client.
   const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
 
   const profile = useMemo(() => speciesById(speciesId), [speciesId])
   // Which fortnight we are replaying, if any. This is STATE, not a ref: the ref
@@ -86,7 +95,7 @@ export default function Page() {
 
   const [pot, setPot] = useState<Pot>(() => newPot(DEFAULT_SPECIES))
   const [startTime, setStartTime] = useState(() => pot.ts)
-  const [mood, setMood] = useState<MoodResult>(OFFLINE)
+  const [mood, setMood] = useState<MoodResult>(BOOTING)
   const [series, setSeries] = useState<SeriesPoint[]>([])
   const [events, setEvents] = useState<CareEvent[]>([])
   const [latest, setLatest] = useState<SensorReading | null>(null)
@@ -106,7 +115,7 @@ export default function Page() {
   /** Ask the server to score what the probe said. It does every calculation. */
   const derive = useCallback(async (rows: SensorReading[], sp: string) => {
     if (rows.length === 0) {
-      setMood(OFFLINE)
+      setMood(BOOTING)
       setSeries([])
       setEvents([])
       setLatest(null)
@@ -168,6 +177,26 @@ export default function Page() {
     }, 600)
     return () => clearInterval(id)
   }, [derive])
+
+  // First paint: emit one reading and score it immediately. Waiting for the
+  // 600ms tick left a window with no data, which is what got rendered as a
+  // fault. The probe has something to say the moment the page exists.
+  useEffect(() => {
+    let alive = true
+    const boot = async () => {
+      const { profile: pr, climate: cl } = live.current
+      const first = probeReading(pot, cl)
+      live.current.lastPostTs = first.ts
+      emit(first)
+      await derive(readingsRef.current, pr.id)
+      if (alive) setMounted(true)
+    }
+    void boot()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // A fresh pot — and a fresh record — when the plant changes.
   useEffect(() => {
@@ -231,6 +260,7 @@ export default function Page() {
       {/* simTime/startTime describe what is ON SCREEN, not the live pot: while a
           fortnight was replaying, the header read "DAY 5" over a 14-day record. */}
       {mounted && (
+      <div className="animate-in fade-in duration-700">
       <PlantHud
         mood={mood}
         reading={latest}
@@ -251,6 +281,7 @@ export default function Page() {
         onPause={() => setPaused((p) => !p)}
         onScenario={runScenario}
       />
+      </div>
       )}
     </main>
   )
