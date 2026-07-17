@@ -238,7 +238,7 @@ export function PlantHud({
             )}
           </div>
 
-          <div className="flex w-full max-w-lg flex-col gap-2">
+          <div className="flex w-full max-w-sm flex-col gap-2">
             <Sparkline series={series} events={events} hex={hex} />
             <div className="flex items-baseline justify-between">
               <span className="text-[11px] tracking-widest text-muted-foreground/60">
