@@ -8,6 +8,12 @@
 //
 // Adding an ambient sensor later is ADDITIVE — push a `light` axis onto a
 // profile's list and the mood engine picks it up with no rewrite.
+//
+// Growth STAGES are the same additive idea in time instead of hardware: a
+// species may declare named stages (cannabis: vega/flora — Thales.xlsx proves
+// the grow already alarms on different bands per stage) that override ONLY the
+// bands they name. No stage declared, or none selected, means the base bands,
+// so every stageless profile below is byte-identical to before.
 
 export type AxisKey = 'moisture' | 'soilTemp' | 'ec' | 'ph' | 'light' | 'airHumidity'
 
@@ -44,6 +50,13 @@ export interface SpeciesProfile {
   emoji: string
   blurb: string
   axes: AxisSpec[]
+  /**
+   * Named growth stages, each overriding ONLY the bands it lists — weights,
+   * trust and the axis set never change with age. Stageless species omit
+   * this; which stage a real plant is in lives in the plant registry
+   * (store.ts), set by its keeper, and travels here through withStage.
+   */
+  stages?: Record<string, Partial<Record<AxisKey, Band>>>
   /** Moisture-% lost per hour at ideal soil temp. */
   dryRatePerHour: number
   /**
@@ -171,6 +184,58 @@ export const SPECIES: SpeciesProfile[] = [
     dryRatePerHour: 1.1,
     droughtPatienceHours: 18,
   },
+  {
+    id: 'cannabis',
+    label: 'CANNABIS',
+    emoji: '🍁',
+    blurb: 'Stage-aware. Vega drinks deep; flora wants restraint.',
+    // Literature guesses for soil in pots — calibrated against NO probe, NO
+    // soil and NO grow, so every axis is flagged, not just the usual EC/pH.
+    axes: soilAxes({
+      moisture: { min: 35, ideal: 55, max: 75 },
+      soilTemp: { min: 15, ideal: 22, max: 30 },
+      ec: { min: 0.8, ideal: 1.5, max: 2.2 },
+      ph: { min: 6.0, ideal: 6.5, max: 7.0 },
+    }).map((a) => ({ ...a, uncalibrated: true })),
+    stages: {
+      // Vegetative growth drinks hard and feeds light…
+      vega: {
+        moisture: { min: 40, ideal: 60, max: 80 },
+        ec: { min: 0.8, ideal: 1.3, max: 2.0 },
+      },
+      // …flowering dries back and feeds heavier.
+      flora: {
+        moisture: { min: 30, ideal: 50, max: 70 },
+        ec: { min: 1.0, ideal: 1.8, max: 2.6 },
+      },
+    },
+    // TODO(felipe-decision-3): Vega/Flora AIR bands (air_temp_c + rh_pct, the
+    // VPD pair) are deliberately ABSENT. Felipe's spreadsheet (Thales.xlsx,
+    // the "Alarme Vega"/"Alarme Flora" label boundaries) is the source of
+    // truth for those thresholds; T0.7b derives them from the sheet and
+    // Felipe confirms — they are not invented here. Until then cannabis
+    // judges soil only, exactly like every other profile.
+    dryRatePerHour: 1.2,
+    droughtPatienceHours: 36,
+  },
+  {
+    id: 'pepper',
+    label: 'PEPPER',
+    emoji: '🌶️',
+    blurb: 'The first real plant on the wire. Warm feet, steady meals.',
+    // Felipe's home pepper in a vase — the first plant a probe actually lives
+    // in. Bands are literature guesses for potted Capsicum, pending
+    // calibration against the real THCPH-S in this pot; until that data
+    // lands, EC and pH keep the usual uncalibrated flags from soilAxes.
+    axes: soilAxes({
+      moisture: { min: 30, ideal: 50, max: 75 },
+      soilTemp: { min: 15, ideal: 24, max: 33 },
+      ec: { min: 0.8, ideal: 1.4, max: 2.4 },
+      ph: { min: 5.8, ideal: 6.3, max: 7.0 },
+    }),
+    dryRatePerHour: 1.0,
+    droughtPatienceHours: 24,
+  },
 ]
 
 export const DEFAULT_SPECIES = SPECIES[0]
@@ -179,6 +244,38 @@ export function speciesById(id: string): SpeciesProfile {
   return SPECIES.find((s) => s.id === id) ?? DEFAULT_SPECIES
 }
 
-export function axisOf(profile: SpeciesProfile, key: AxisKey): AxisSpec | undefined {
-  return profile.axes.find((a) => a.key === key)
+/**
+ * Resolve a profile to a growth stage: overridden bands in, everything else
+ * (weights, trust, display, the axis set) untouched. `null`/`undefined` means
+ * stageless and returns the profile AS-IS — the same object, so every
+ * stageless caller behaves byte-identically to before. A stage the species
+ * never declared is REFUSED, not defaulted: judging flora by base bands
+ * because of a typo in the registry would be a quiet lie about the plant.
+ */
+export function withStage(
+  profile: SpeciesProfile,
+  stage: string | null | undefined,
+): SpeciesProfile {
+  if (stage === null || stage === undefined) return profile
+  // Object.hasOwn, as in channels.ts: a stage named "toString" is unknown.
+  const overrides =
+    profile.stages && Object.hasOwn(profile.stages, stage) ? profile.stages[stage] : undefined
+  if (!overrides) {
+    throw new Error(`species ${profile.id} has no stage "${stage}" — refusing to guess bands`)
+  }
+  return {
+    ...profile,
+    axes: profile.axes.map((a) => {
+      const band = overrides[a.key]
+      return band === undefined ? a : { ...a, band }
+    }),
+  }
+}
+
+export function axisOf(
+  profile: SpeciesProfile,
+  key: AxisKey,
+  stage?: string | null,
+): AxisSpec | undefined {
+  return withStage(profile, stage ?? null).axes.find((a) => a.key === key)
 }

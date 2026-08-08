@@ -20,3 +20,7 @@ node_modules
 
 # build artifacts
 *.tsbuildinfo
+
+# firmware — real secrets and ESPHome build cache stay on the desk
+firmware/secrets.yaml
+firmware/.esphome/
