@@ -1,0 +1,15 @@
+# Dataset build configuration.
+#
+# Names bind LATE. Science and execution lead; brand/domains are the secondary
+# track, so the dataset name stays a placeholder until the brand locks and
+# binding day becomes a one-file edit instead of a refactor.
+
+dataset_name: OPENVPD_SEED_PLACEHOLDER # binds when brand locks — secondary track
+hf_org: HF_ORG_PLACEHOLDER # target Hugging Face org ("openvpd" verified free 2026-08-08)
+
+license: CC-BY-4.0
+
+# Version stamp for every derived column (VPD and its sigma). Keep in sync with
+# DERIVATION_VERSION in etl/vpd.py — changing the math (even a coefficient set)
+# means a NEW version string, never a silent edit to an old one.
+derivation_version: vpd-tetens-v1

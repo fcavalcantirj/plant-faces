@@ -1,0 +1,30 @@
+# Outcome log — the human-maintained source for the `outcomes` table.
+#
+# One open outcome per enrolled plant, opened on enrollment day, closed with
+# an end state — harvest, gift-away, or DEATH. A death is a first-class
+# outcome, not a gap: under-logged deaths are the survivorship bias that
+# ruins every hobbyist dataset, so the ETL hard-fails a build where a closed
+# plant has an unclosed outcome.
+#
+# HEALTH RUBRIC (0–5) — pin every weekly health_check to this, with a photo:
+#   0  dead
+#   1  severe decline — major wilt/necrosis, unlikely to recover
+#   2  struggling — visible stress, no new growth
+#   3  stable — no stress signs, no notable new growth
+#   4  thriving — actively producing new growth
+#   5  exceptional — vigorous growth, textbook specimen for the stage
+#
+# Template — copy, fill, uncomment:
+#
+# - outcome_id: outcome-001
+#   plant_id: plant-001
+#   opened_at: 2026-08-15
+#   closed_at: null             # date + end state close it, together
+#   health_checks:              # weekly, rubric score + photo id
+#     - { date: 2026-08-15, health_0_5: 4, photo_id: photo-001 }
+#   yield_g_dry: null           # filled at harvest, if applicable
+#   yield_source: self          # self | verified
+#   death_bool: false
+#   death_cause: null           # taxonomy tag + free text when death_bool
+
+outcomes: []

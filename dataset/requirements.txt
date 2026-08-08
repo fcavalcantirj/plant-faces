@@ -1,0 +1,10 @@
+# ETL toolchain. openpyxl is for the Thales.xlsx backfill importer (T0.11) —
+# months of real Tuya temp/RH history live in monthly Excel sheets.
+# psycopg2-binary is for etl/pull_archive.py — the live Postgres archive
+# (raw_readings on the Oracle box) is the authoritative source the Parquet
+# build reads from.
+pandas
+pyarrow
+pytest
+openpyxl
+psycopg2-binary

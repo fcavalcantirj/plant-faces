@@ -1,0 +1,22 @@
+# Plant registry — the human-maintained source for the `plants` table.
+#
+# One entry per enrolled plant. Enrolling a plant OPENS an outcome in
+# outcomes.yaml the same day (enrollment-must-close: the ETL hard-fails on a
+# closed plant whose outcome never closed — deaths get recorded, not
+# forgotten). Coarse geography only; species may be "unspecified".
+#
+# Template — copy, fill, uncomment:
+#
+# - plant_id: plant-001
+#   label: Thalesadão
+#   species: unspecified        # GBIF name, or the literal "unspecified"
+#   cultivar: null
+#   medium: soil
+#   light: "LED, 18/6"
+#   stage: vega                 # vega | flora | single (stage-aware bands)
+#   coarse_geo: "Köppen Aw"     # NEVER finer than this
+#   grower_id: grower-anon-01
+#   enrolled_at: 2026-08-15     # date the probe went in + first health_check
+#   closed_at: null             # set ONLY when the outcome closes
+
+plants: []
