@@ -20,7 +20,14 @@ import {
   SlugTakenError,
   type PlantRecord,
 } from './store.ts'
-import { mintDevice, mintPlantId, mintSourceToken, parseMintBody } from './devices.ts'
+import {
+  applyPublicFlip,
+  mintDevice,
+  mintPlantId,
+  mintSourceToken,
+  parseMintBody,
+  parsePatchBody,
+} from './devices.ts'
 
 // The suite exercises the in-process backend. KV env leaking in from the
 // shell would silently turn these into network tests — strip it up front.
@@ -253,4 +260,59 @@ test('mint: a device mint creates the plant, claims the slug, registers the sour
   assert.equal((await getPlantBySlug('minty'))?.plantId, plantId)
   // The point of it all: a minted token's history no longer evaporates.
   assert.equal(await shouldExpire(sourceToken), false)
+})
+
+// ── public flip ─────────────────────────────────────────────────────────────
+
+test('flip body: exactly plant_id + public parses, nothing added', () => {
+  const r = parsePatchBody({ plant_id: 'plt_0011223344556677', public: true })
+  assert.ok(r.ok, r.ok ? '' : r.error)
+  assert.deepEqual(r.body, { plant_id: 'plt_0011223344556677', public: true })
+})
+
+test('flip body: refusals name the offending field, look-alikes not coerced', () => {
+  const cases: [Record<string, unknown> | string, string][] = [
+    ['nope', 'object'],
+    [{ public: true }, 'plant_id'], // missing
+    [{ plant_id: 'plt_x' }, 'public'], // missing
+    [{ plant_id: 42, public: true }, 'plant_id'], // wrong type
+    [{ plant_id: '   ', public: true }, 'plant_id'], // blank is not an id
+    [{ plant_id: 'plt_x', public: 'true' }, 'public'], // string, not boolean
+    [{ plant_id: 'plt_x', public: 1 }, 'public'], // truthy, not true
+    [{ plant_id: 'plt_x', public: true, slug: 'sneaky' }, 'slug'], // unknown field by name
+  ]
+  for (const [body, needle] of cases) {
+    const r = parsePatchBody(body)
+    assert.ok(!r.ok, `${JSON.stringify(body)} must be refused`)
+    assert.ok(r.error.includes(needle), `refusal must mention "${needle}" (got: ${r.error})`)
+  }
+})
+
+test('flip: false→true→false round-trips and touches nothing else', async () => {
+  const minted = parseMintBody({ label: 'Flippy', species: 'pepper', slug: 'flippy' })
+  assert.ok(minted.ok, minted.ok ? '' : minted.error)
+  const { plantId, sourceToken } = await mintDevice(minted.body, NOW)
+  assert.equal((await getPlant(plantId))?.public, false, 'plants are born private')
+
+  const published = await applyPublicFlip({ plant_id: plantId, public: true })
+  assert.equal(published?.public, true)
+  assert.equal((await getPlant(plantId))?.public, true, 'the flip must reach the registry')
+
+  const unpublished = await applyPublicFlip({ plant_id: plantId, public: false })
+  assert.equal(unpublished?.public, false)
+  // Everything except the bit survives the round trip verbatim.
+  assert.deepEqual(await getPlant(plantId), {
+    label: 'Flippy',
+    species: 'pepper',
+    stage: null,
+    sources: [sourceToken],
+    public: false,
+  })
+  // The slug still resolves — a flip must never disturb the public name.
+  assert.equal((await getPlantBySlug('flippy'))?.plantId, plantId)
+})
+
+test('flip: an unknown plant is refused, never upserted into existence', async () => {
+  assert.equal(await applyPublicFlip({ plant_id: 'plt_never_minted_000', public: true }), null)
+  assert.equal(await getPlant('plt_never_minted_000'), null, 'the flip must not create a row')
 })

@@ -1,17 +1,20 @@
-// Admin minting — the testable logic behind POST /api/devices.
+// Admin minting and publishing — the testable logic behind /api/devices.
 //
-// Minting is the only way a source token and its plant come into existence:
-// one validated request creates the plant row, claims the optional public
-// slug, and registers the source — after which the token's readings stop
-// evaporating (the retention split in store.ts). The route handler stays thin;
-// everything with behavior worth pinning lives here.
+// Minting (POST) is the only way a source token and its plant come into
+// existence: one validated request creates the plant row, claims the optional
+// public slug, and registers the source — after which the token's readings
+// stop evaporating (the retention split in store.ts). Publishing (PATCH) is
+// the separate, deliberate act minting refuses to bundle: plants are born
+// private, and only an explicit flip here makes /api/public/[slug] answer.
+// The route handler stays thin; everything with behavior worth pinning lives
+// here.
 //
 // The value imports carry explicit .ts extensions because lib code runs under
 // node --experimental-strip-types in tests, whose resolver requires them.
 
 import { randomBytes } from 'node:crypto'
 import { SPECIES } from './species.ts'
-import { registerSource, upsertPlant, type PlantRecord } from './store.ts'
+import { getPlant, registerSource, upsertPlant, type PlantRecord } from './store.ts'
 
 export interface MintRequest {
   label: string
@@ -130,4 +133,57 @@ export async function mintDevice(
   await upsertPlant(plantId, plant, body.slug)
   await registerSource(sourceToken, { plant_id: plantId, adapter: body.adapter, claimed_at: now })
   return { sourceToken, plantId }
+}
+
+// ── the public flip ─────────────────────────────────────────────────────────
+
+export interface PatchRequest {
+  plant_id: string
+  public: boolean
+}
+
+export type PatchParse = { ok: true; body: PatchRequest } | { ok: false; error: string }
+
+const PATCH_KEYS = ['plant_id', 'public'] as const
+
+/**
+ * Validate a public-flip body. Same honesty gate as the mint above: unknown
+ * fields are refused by name, and `public` must be an actual boolean — a
+ * "true" string or a 1 is refused, never coerced, because the difference
+ * between a plant that is public and one that is not must never hinge on a
+ * truthiness accident.
+ */
+export function parsePatchBody(raw: unknown): PatchParse {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ok: false, error: 'body must be an object' }
+  }
+  const b = raw as Record<string, unknown>
+  for (const k of Object.keys(b)) {
+    if (!(PATCH_KEYS as readonly string[]).includes(k)) {
+      return { ok: false, error: `${k} is not a recognized patch field` }
+    }
+  }
+  if (typeof b.plant_id !== 'string' || b.plant_id.trim().length === 0) {
+    return { ok: false, error: 'plant_id must be a non-empty string' }
+  }
+  if (typeof b.public !== 'boolean') {
+    return { ok: false, error: 'public must be true or false — a boolean, not a look-alike' }
+  }
+  return { ok: true, body: { plant_id: b.plant_id, public: b.public } }
+}
+
+/**
+ * Flip a plant's public bit. The one registry mutation this door performs:
+ * read the row, rewrite it with the new bit, touch nothing else — label,
+ * species, stage, sources and slug all survive verbatim. An unknown plant_id
+ * returns null for the route to 404; a flip must never upsert a plant into
+ * existence. Re-flipping to the current state is an idempotent rewrite, not
+ * an error — PATCH twice, same world.
+ */
+export async function applyPublicFlip(body: PatchRequest): Promise<PlantRecord | null> {
+  const plant = await getPlant(body.plant_id)
+  if (plant === null) return null
+  const updated: PlantRecord = { ...plant, public: body.public }
+  await upsertPlant(body.plant_id, updated)
+  return updated
 }
