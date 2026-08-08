@@ -1,0 +1,184 @@
+# Plant Node — WROOM-32 + MAX485 + ComWinTop THCPH-S (RS485 4-in-1 soil probe).
+#
+# The bench contract lives in home-automations/builds/plant-node.md — this file
+# is the code half of that doc. Every block marked ⚠ BENCH-VERIFY below is a
+# HYPOTHESIS (the vendor's usual layout) until register discovery (T1.2)
+# confirms it; record reality in the doc's Lab notes and correct these comments
+# and values to match.
+#
+# Doctrine:
+#   - FC03 reads ONLY. The THCPH-S exposes writable calibration registers; one
+#     stray write silently mis-calibrates the probe and poisons every reading
+#     after it. This node never writes.
+#   - NO CLAMPING anywhere. A glitched value ships raw and the server 400s it
+#     (refuse-don't-clamp lives in web/lib/ingest.ts). The firmware never
+#     "fixes" a number — it only applies the probe's documented unit scales.
+
+substitutions:
+  # Pulled from secrets so the token never lands in git. It DOES land in flash,
+  # where it is extractable — which is why it is a low-privilege source token,
+  # not an account credential (see README).
+  device_token: !secret device_token
+
+esphome:
+  name: plant-node
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# Logs are the register-discovery instrument: sensor states print at DEBUG
+# (the default level), so `esphome logs` is all the bench protocol needs.
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# ⚠ BENCH-VERIFY: an unsynced clock posts 1970 and the server refuses it
+# ("ts is implausibly old"). The 15-min interval below gates on this being
+# valid — the gate is in firmware, not hope. SNTP over the local network must
+# actually sync at the bench before the first 202 can happen.
+time:
+  - platform: sntp
+    id: sntp_time
+
+# ⚠ BENCH-VERIFY: 4800 baud 8N1 is the common factory default for this probe
+# family — try it first, then 9600 if the bus stays silent. Silence at both
+# bauds → swap A/B (non-destructive, ten seconds) → then the ≥9V probe-supply
+# fallback, in that order (see builds/plant-node.md).
+uart:
+  id: uart_rs485
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 4800
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+# The MAX485 is half-duplex: DE and RE are tied together and driven by one pin
+# so the transceiver flips between talk and listen. GPIO4 per the wiring table.
+modbus:
+  id: modbus_bus
+  uart_id: uart_rs485
+  flow_control_pin: GPIO4
+
+# ⚠ BENCH-VERIFY: slave address 0x01 is the usual factory default. If the probe
+# answers nothing at either baud with A/B both ways, the address is the next
+# suspect — some units ship at 0x02.
+modbus_controller:
+  - id: thcphs
+    address: 0x01
+    modbus_id: modbus_bus
+    update_interval: 60s
+
+# The four holding registers, 0x0000–0x0003, read FC03 in one contiguous batch.
+# Scale filters convert the probe's raw integers to the wire units — that is
+# unit conversion, not clamping: an implausible value passes through untouched
+# and gets 400d by the server.
+sensor:
+  # ⚠ BENCH-VERIFY: register 0x0000 = moisture, raw ×0.1 %. Sanity anchor:
+  # probe in free air reads ≈0–5. A big number in air means the register map
+  # is shifted or swapped.
+  - platform: modbus_controller
+    modbus_controller_id: thcphs
+    id: soil_moisture
+    name: "Soil Moisture"
+    register_type: holding
+    address: 0x0000
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # ⚠ BENCH-VERIFY: register 0x0001 = soil temp, raw ×0.1 °C, SIGNED — a winter
+  # probe reads negative, so this must decode as int16 (S_WORD), never U_WORD.
+  # Sanity anchor: ≈ room temperature ±3 °C on the desk; gripping the probe
+  # must warm it (proves register, scale AND sign decode in one move).
+  - platform: modbus_controller
+    modbus_controller_id: thcphs
+    id: soil_temp
+    name: "Soil Temperature"
+    register_type: holding
+    address: 0x0001
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # ⚠ BENCH-VERIFY: register 0x0002 = EC in µS/cm. The wire wants mS/cm
+  # (server plausible range 0–20), hence ×0.001 — this is the µS→mS unit
+  # conversion, nothing else. Sanity anchors: ≈0 in free air; nutrient water
+  # reads clearly above tap water.
+  - platform: modbus_controller
+    modbus_controller_id: thcphs
+    id: soil_ec
+    name: "Soil EC"
+    register_type: holding
+    address: 0x0002
+    value_type: U_WORD
+    unit_of_measurement: "mS/cm"
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.001
+
+  # ⚠ BENCH-VERIFY: register 0x0003 = pH, raw ×0.1 OR ×0.01 — vendors ship
+  # both. The tap-water glass is the scale oracle: tap ≈ pH 7, so a raw reading
+  # of ~70 means ×0.1 (keep this filter), ~700 means ×0.01 (change the multiply
+  # to 0.01). Decide at the bench, then fix this comment to state which.
+  - platform: modbus_controller
+    modbus_controller_id: thcphs
+    id: soil_ph
+    name: "Soil pH"
+    register_type: holding
+    address: 0x0003
+    value_type: U_WORD
+    unit_of_measurement: "pH"
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+http_request:
+  id: http_ingest
+  timeout: 10s
+
+# Every 15 min, POST the exact web/lib/ingest.ts wire body. On a 400 (glitch
+# read, out-of-range value) the node does nothing special — it just tries again
+# next cycle with whatever the probe says then. Never retry-with-a-nicer-value.
+interval:
+  - interval: 15min
+    then:
+      - if:
+          condition:
+            # Two gates, both honesty gates, neither a clamp:
+            #   - SNTP valid: an unsynced clock would post a 1970 ts.
+            #   - No NaNs: before the probe's first successful read the sensor
+            #     states are NaN, which would serialize as null and 400.
+            # Skipping the cycle invents no value — the next cycle posts raw.
+            lambda: |-
+              return id(sntp_time).now().is_valid()
+                  && !isnan(id(soil_moisture).state)
+                  && !isnan(id(soil_temp).state)
+                  && !isnan(id(soil_ec).state)
+                  && !isnan(id(soil_ph).state);
+          then:
+            - http_request.post:
+                url: !secret ingest_url
+                request_headers:
+                  Content-Type: application/json
+                # EXACTLY the six keys of web/lib/ingest.ts IngestBody — the
+                # device_token travels in the BODY, not a header (the server
+                # reads JSON only; an Authorization header would be ignored).
+                json: |-
+                  root["device_token"] = "${device_token}";
+                  // Epoch MILLISECONDS. time_t is seconds and can be 32-bit on
+                  // this toolchain — cast to uint64_t BEFORE the *1000 or the
+                  // multiply overflows and the server sees a 1970-adjacent ts.
+                  root["ts"] = (uint64_t) id(sntp_time).now().timestamp * 1000ULL;
+                  root["moisture"] = id(soil_moisture).state;
+                  root["soil_temp"] = id(soil_temp).state;
+                  root["ec"] = id(soil_ec).state;
+                  root["ph"] = id(soil_ph).state;
