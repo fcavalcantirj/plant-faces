@@ -26,7 +26,7 @@ function makeSprite(): THREE.Texture {
   const ctx = canvas.getContext('2d')!
   const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
   grad.addColorStop(0, 'rgba(255,255,255,1)')
-  grad.addColorStop(0.35, 'rgba(255,255,255,0.8)')
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.9)')
   grad.addColorStop(1, 'rgba(255,255,255,0)')
   ctx.fillStyle = grad
   ctx.fillRect(0, 0, size, size)
@@ -37,6 +37,15 @@ function makeSprite(): THREE.Texture {
 
 function ParticleFace({ emotion }: { emotion: Emotion }) {
   const pointsRef = useRef<THREE.Points>(null)
+  // v9 solidity: the fine main pass carries texture grain only — fat
+  // under-layer passes carry the MASS (note three.js sizeAttenuation renders
+  // points ~2.6x smaller than their world size suggests at fov 42, so the
+  // mass sizes look big on paper). crownRef re-draws the sprout range,
+  // headRef the face shell, featRef the eyes/mouth/brows — fusing the dense
+  // point clouds into solid material instead of ghost-dust.
+  const crownRef = useRef<THREE.Points>(null)
+  const headRef = useRef<THREE.Points>(null)
+  const featRef = useRef<THREE.Points>(null)
   const groupRef = useRef<THREE.Group>(null)
 
   const sprite = useMemo(() => makeSprite(), [])
@@ -138,9 +147,9 @@ function ParticleFace({ emotion }: { emotion: Emotion }) {
         y = MOUTH_Y + (y - MOUTH_Y) * mouthPulse
         x = x * (1 + (mouthPulse - 1) * 0.15)
       }
-      // sprout crown: gentle independent sway — a slow breeze over the
-      // shoots, tips travel further than the roots (per-emotion droop is
-      // baked into the targets, so the morph lerp already animates the wilt)
+      // spike crown: gentle independent sway — a slow breeze over the
+      // spikes, tips travel further than the roots (per-emotion wilt is
+      // baked into the targets, so the morph lerp already animates the sag)
       if (i >= sp0) {
         const sw = Math.min(Math.max((current[idx + 1] - SPROUT_BASE_Y) / SPROUT_SPAN, 0), 1)
         x += Math.sin(t * 0.8 + phase[i] * 0.3) * 0.05 * sw
@@ -163,6 +172,32 @@ function ParticleFace({ emotion }: { emotion: Emotion }) {
       geo.attributes.position.needsUpdate = true
       ;(geo.attributes.color as THREE.BufferAttribute).copyArray(currentColors)
       geo.attributes.color.needsUpdate = true
+    }
+    // crown mass pass mirrors the sprout slice of the same simulation
+    const cgeo = crownRef.current?.geometry
+    if (cgeo) {
+      ;(cgeo.attributes.position as THREE.BufferAttribute).copyArray(display.subarray(sp0 * 3))
+      cgeo.attributes.position.needsUpdate = true
+      ;(cgeo.attributes.color as THREE.BufferAttribute).copyArray(currentColors.subarray(sp0 * 3))
+      cgeo.attributes.color.needsUpdate = true
+    }
+    // face mass pass mirrors the head-shell slice
+    const hEnd = RANGES.head[1]
+    const hgeo = headRef.current?.geometry
+    if (hgeo) {
+      ;(hgeo.attributes.position as THREE.BufferAttribute).copyArray(display.subarray(0, hEnd * 3))
+      hgeo.attributes.position.needsUpdate = true
+      ;(hgeo.attributes.color as THREE.BufferAttribute).copyArray(currentColors.subarray(0, hEnd * 3))
+      hgeo.attributes.color.needsUpdate = true
+    }
+    // features mass pass mirrors the eyes/mouth/brows slice
+    const fEnd = RANGES.rightBrow[1]
+    const fgeo = featRef.current?.geometry
+    if (fgeo) {
+      ;(fgeo.attributes.position as THREE.BufferAttribute).copyArray(display.subarray(hEnd * 3, fEnd * 3))
+      fgeo.attributes.position.needsUpdate = true
+      ;(fgeo.attributes.color as THREE.BufferAttribute).copyArray(currentColors.subarray(hEnd * 3, fEnd * 3))
+      fgeo.attributes.color.needsUpdate = true
     }
 
     // idle drift + emotion head tilt
@@ -194,10 +229,77 @@ function ParticleFace({ emotion }: { emotion: Emotion }) {
           <bufferAttribute attach="attributes-color" args={[Float32Array.from(sim.currentColors), 3]} />
         </bufferGeometry>
         <pointsMaterial
-          size={0.05}
+          size={0.03}
           map={sprite}
           vertexColors
           transparent
+          opacity={0.65}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          sizeAttenuation
+        />
+      </points>
+      <points ref={crownRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            args={[Float32Array.from(sim.current.subarray(RANGES.sprout[0] * 3)), 3]}
+          />
+          <bufferAttribute
+            attach="attributes-color"
+            args={[Float32Array.from(sim.currentColors.subarray(RANGES.sprout[0] * 3)), 3]}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.085}
+          map={sprite}
+          vertexColors
+          transparent
+          opacity={0.25}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          sizeAttenuation
+        />
+      </points>
+      <points ref={headRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            args={[Float32Array.from(sim.current.subarray(0, RANGES.head[1] * 3)), 3]}
+          />
+          <bufferAttribute
+            attach="attributes-color"
+            args={[Float32Array.from(sim.currentColors.subarray(0, RANGES.head[1] * 3)), 3]}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.15}
+          map={sprite}
+          vertexColors
+          transparent
+          opacity={0.24}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          sizeAttenuation
+        />
+      </points>
+      <points ref={featRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            args={[Float32Array.from(sim.current.subarray(RANGES.head[1] * 3, RANGES.rightBrow[1] * 3)), 3]}
+          />
+          <bufferAttribute
+            attach="attributes-color"
+            args={[Float32Array.from(sim.currentColors.subarray(RANGES.head[1] * 3, RANGES.rightBrow[1] * 3)), 3]}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.07}
+          map={sprite}
+          vertexColors
+          transparent
+          opacity={0.35}
           depthWrite={false}
           blending={THREE.AdditiveBlending}
           sizeAttenuation
@@ -246,7 +348,7 @@ function Dust() {
 export function AgentFace({ emotion }: { emotion: Emotion }) {
   return (
     <Canvas
-      camera={{ position: [0, 0.25, 6.7], fov: 42 }}
+      camera={{ position: [0, 0.42, 7.1], fov: 42 }}
       gl={{ antialias: true, alpha: false }}
       dpr={[1, 2]}
     >
@@ -257,8 +359,10 @@ export function AgentFace({ emotion }: { emotion: Emotion }) {
       <OrbitControls
         // orbit target rides above the origin so the crown gets headroom —
         // OrbitControls re-aims the camera at its target, so raising the
-        // camera alone buys nothing
-        target={[0, 0.25, 0]}
+        // camera alone buys nothing (the v2 lesson). 0.42 + camera z 7.1
+        // frames the tallest spike preset (s3 tips reach y ~2.55; content
+        // spans -1.75..2.55, centered at 0.4).
+        target={[0, 0.42, 0]}
         enablePan={false}
         enableZoom={false}
         minPolarAngle={Math.PI * 0.35}
