@@ -5,8 +5,9 @@
 //
 // The creature is a plant (Groot-planter energy): big round puppy eyes, small
 // leaf-tuft brows, a bark/moss head shell with faint vertical striations, and a
-// sprout (stem + leaves) crowning the head. Feature colors keep the emotion hue
-// exactly — mood legibility is product law — the shell and sprout only tint.
+// branchy crown of tapering shoots sprouting across the top of the head.
+// Feature colors keep the emotion hue exactly — mood legibility is product
+// law — the shell and crown only tint.
 
 export type Emotion =
   | 'neutral'
@@ -42,7 +43,7 @@ export const COUNTS = {
   eye: 420,
   mouth: 660,
   brow: 200,
-  sprout: 350,
+  sprout: 550,
 }
 
 export const TOTAL =
@@ -73,7 +74,10 @@ export const EYE_Y = 0.3
 export const MOUTH_Y = -0.58
 const BROW_Y = 0.66
 const FEATURE_Z = 1.05
-const SPROUT_BASE_Y = 1.45
+// Crown vertical range: droop weighting and the renderer's sway both grade
+// from 0 at SPROUT_BASE_Y to 1 at SPROUT_BASE_Y + SPROUT_SPAN (the tip zone).
+export const SPROUT_BASE_Y = 1.4
+export const SPROUT_SPAN = 1.0
 
 export interface EmotionMeta {
   label: string
@@ -378,8 +382,10 @@ function squiggleStroke(
   }
 }
 
-// 3D bezier stroke with thickness (the sprout stem)
-function stroke3D(
+// Tapering 3D shoot (the crown twigs): a quadratic bezier rising off the
+// head, with particle density graded toward the base and thickness thinning
+// toward the tip — the base reads solid wood, the tip reads twig.
+function shoot3D(
   out: Float32Array,
   start: number,
   count: number,
@@ -389,15 +395,16 @@ function stroke3D(
   thickness: number,
 ) {
   for (let i = 0; i < count; i++) {
-    const t = Math.random()
+    const t = Math.pow(Math.random(), 1.35) // more particles near the base
     const mt = 1 - t
+    const th = thickness * (1.2 - 0.9 * t) // fat base, twig tip
     const idx = (start + i) * 3
     out[idx] =
-      mt * mt * p0[0] + 2 * mt * t * c[0] + t * t * p1[0] + (Math.random() - 0.5) * thickness
+      mt * mt * p0[0] + 2 * mt * t * c[0] + t * t * p1[0] + (Math.random() - 0.5) * th
     out[idx + 1] =
-      mt * mt * p0[1] + 2 * mt * t * c[1] + t * t * p1[1] + (Math.random() - 0.5) * thickness
+      mt * mt * p0[1] + 2 * mt * t * c[1] + t * t * p1[1] + (Math.random() - 0.5) * th
     out[idx + 2] =
-      mt * mt * p0[2] + 2 * mt * t * c[2] + t * t * p1[2] + (Math.random() - 0.5) * thickness * 0.6
+      mt * mt * p0[2] + 2 * mt * t * c[2] + t * t * p1[2] + (Math.random() - 0.5) * th * 0.6
   }
 }
 
@@ -456,35 +463,63 @@ function getHeadShell(): Float32Array {
     // thin out the very front so facial features stand clear
     if (z > 0.72 && Math.random() < 0.68) continue
     const j = 0.97 + Math.random() * 0.06
+    // Groot silhouette: the upper half stretches taller (top reaches ~1.78
+    // while the chin stays put) and tapers narrower toward the crown.
+    const up = Math.max(0, u)
+    const taper = 1 - 0.18 * up * up
+    const yScale = 1.68 + 0.1 * up
     const idx = i * 3
-    out[idx] = x * 1.32 * j
-    out[idx + 1] = y * 1.68 * j
-    out[idx + 2] = z * 1.02 * j
+    out[idx] = x * 1.32 * taper * j
+    out[idx + 1] = y * yScale * j
+    out[idx + 2] = z * 1.02 * taper * j
     i++
   }
   headCache = out
   return out
 }
 
-// ---------- sprout (shared geometry; droop is applied per emotion) ----------
+// ---------- sprout crown (shared geometry; droop is applied per emotion) ----------
 
 let sproutCache: Float32Array | null = null
 
+// Groot crown: five tapering shoots rooted across the top cap of the shell
+// (roots sit on the tapered dome surface, x spread ±0.56), each rising
+// 0.35–0.75 above the shell top (~1.78) on a slightly outward-curling bezier.
+// Outer shoots lean outward hardest and stay short; the center shoot is
+// tallest, its left neighbor second — the asymmetry reads organic. The two
+// tallest shoots each carry one small leaf.
 function getSprout(): Float32Array {
   if (sproutCache) return sproutCache
   const out = new Float32Array(COUNTS.sprout * 3)
-  const stem = 110
-  const leafL = 105
-  const leafR = 105
-  const leafT = COUNTS.sprout - stem - leafL - leafR
-  // stem: slight S-curve rising off the crown
-  stroke3D(out, 0, stem, [0.02, 1.44, 0.3], [-0.09, 1.66, 0.34], [0.0, 1.86, 0.3], 0.05)
-  // left leaf leans left, blade plane tilted toward the camera
-  leafBlade(out, stem, leafL, [-0.01, 1.8, 0.31], [-0.26, 1.94, 0.38], [-0.46, 2.02, 0.44], 0.1, 0.55)
-  // right leaf leans right, slightly higher, tilted away
-  leafBlade(out, stem + leafL, leafR, [0.02, 1.84, 0.28], [0.26, 2.0, 0.22], [0.44, 2.06, 0.16], 0.095, -0.55)
-  // baby top leaf
-  leafBlade(out, stem + leafL + leafR, leafT, [0.0, 1.86, 0.3], [-0.03, 2.0, 0.31], [-0.05, 2.1, 0.32], 0.055, 0.2)
+  const shoots: Array<{
+    n: number
+    p0: [number, number, number]
+    c: [number, number, number]
+    p1: [number, number, number]
+    w: number
+  }> = [
+    // far left: short, curls hard outward
+    { n: 78, p0: [-0.56, 1.4, 0.32], c: [-0.64, 1.88, 0.35], p1: [-0.94, 2.14, 0.38], w: 0.055 },
+    // mid left: second-tallest (carries a leaf)
+    { n: 92, p0: [-0.3, 1.56, 0.34], c: [-0.34, 2.06, 0.37], p1: [-0.53, 2.4, 0.4], w: 0.06 },
+    // center: tallest (carries a leaf), gentle rightward curl
+    { n: 102, p0: [0.03, 1.63, 0.29], c: [-0.06, 2.12, 0.31], p1: [0.11, 2.53, 0.3], w: 0.065 },
+    // mid right
+    { n: 90, p0: [0.31, 1.56, 0.31], c: [0.37, 2.03, 0.29], p1: [0.57, 2.38, 0.27], w: 0.06 },
+    // far right: short, curls hard outward
+    { n: 78, p0: [0.56, 1.4, 0.29], c: [0.63, 1.84, 0.27], p1: [0.92, 2.16, 0.24], w: 0.055 },
+  ]
+  let at = 0
+  for (const s of shoots) {
+    shoot3D(out, at, s.n, s.p0, s.c, s.p1, s.w)
+    at += s.n
+  }
+  // two small leaves, one on each of the two tallest shoots
+  const leafN = Math.floor((COUNTS.sprout - at) / 2)
+  // center shoot's leaf leans right, tilted toward the camera
+  leafBlade(out, at, leafN, [0.1, 2.44, 0.3], [0.24, 2.52, 0.27], [0.38, 2.51, 0.24], 0.07, -0.4)
+  // mid-left shoot's leaf leans left, tilted away
+  leafBlade(out, at + leafN, COUNTS.sprout - at - leafN, [-0.51, 2.32, 0.4], [-0.68, 2.42, 0.44], [-0.82, 2.44, 0.48], 0.065, 0.45)
   sproutCache = out
   return out
 }
@@ -512,16 +547,17 @@ export function buildTargets(emotion: Emotion): EmotionTargets {
   const [rB] = RANGES.rightBrow
   const [sp] = RANGES.sprout
 
-  // sprout: same geometry for every emotion, wilted by the emotion's droop
+  // sprout crown: same geometry for every emotion, wilted by the emotion's
+  // droop — shoots bow outward-down, tips travel furthest
   positions.set(getSprout(), sp * 3)
   const droop = SPROUT_DROOP[emotion]
   if (droop > 0) {
     for (let i = sp; i < TOTAL; i++) {
       const idx = i * 3
       const h = Math.max(0, positions[idx + 1] - SPROUT_BASE_Y)
-      const w = Math.min(h / 0.65, 1)
-      positions[idx + 1] -= droop * 0.28 * w * w // leaf tips wilt down
-      positions[idx] *= 1 + droop * 0.06 * w // and splay slightly outward
+      const w = Math.min(h / SPROUT_SPAN, 1)
+      positions[idx + 1] -= droop * 0.5 * w * w // shoot tips wilt down
+      positions[idx] *= 1 + droop * 0.14 * w // and splay outward
     }
   }
 
