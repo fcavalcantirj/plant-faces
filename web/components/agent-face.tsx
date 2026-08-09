@@ -11,8 +11,6 @@ import {
   EYE_Y,
   MOUTH_Y,
   RANGES,
-  SPROUT_BASE_Y,
-  SPROUT_SPAN,
   TOTAL,
   type Emotion,
 } from '@/lib/face-points'
@@ -138,12 +136,12 @@ function ParticleFace({ emotion }: { emotion: Emotion }) {
         y = MOUTH_Y + (y - MOUTH_Y) * mouthPulse
         x = x * (1 + (mouthPulse - 1) * 0.15)
       }
-      // sprout crown: gentle independent sway — a slow breeze over the
-      // shoots, tips travel further than the roots (per-emotion droop is
-      // baked into the targets, so the morph lerp already animates the wilt)
+      // sprout: gentle independent sway — a slow breeze, tips travel further
+      // than the base (per-emotion droop is baked into the targets, so the
+      // morph lerp already animates the wilt)
       if (i >= sp0) {
-        const sw = Math.min(Math.max((current[idx + 1] - SPROUT_BASE_Y) / SPROUT_SPAN, 0), 1)
-        x += Math.sin(t * 0.8 + phase[i] * 0.3) * 0.05 * sw
+        const sw = Math.min(Math.max((current[idx + 1] - 1.4) / 0.6, 0), 1)
+        x += Math.sin(t * 0.8 + phase[i] * 0.3) * 0.045 * sw
       }
       // glitch: static jitter, stronger on horizontal scanline bands
       if (glitchAmp > 0) {
@@ -246,19 +244,15 @@ function Dust() {
 export function AgentFace({ emotion }: { emotion: Emotion }) {
   return (
     <Canvas
-      camera={{ position: [0, 0.25, 6.7], fov: 42 }}
+      camera={{ position: [0, 0.12, 6.1], fov: 42 }}
       gl={{ antialias: true, alpha: false }}
       dpr={[1, 2]}
     >
       <color attach="background" args={['#070a10']} />
-      <fog attach="fog" args={['#070a10', 6.9, 12.9]} />
+      <fog attach="fog" args={['#070a10', 6, 12]} />
       <ParticleFace emotion={emotion} />
       <Dust />
       <OrbitControls
-        // orbit target rides above the origin so the crown gets headroom —
-        // OrbitControls re-aims the camera at its target, so raising the
-        // camera alone buys nothing
-        target={[0, 0.25, 0]}
         enablePan={false}
         enableZoom={false}
         minPolarAngle={Math.PI * 0.35}
