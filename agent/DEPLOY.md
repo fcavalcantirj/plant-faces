@@ -306,3 +306,16 @@ non-loopback bind for a face running on another machine.
 4. Grounding smoke: ask for a number with the web API stopped — the reply must
    be "não estou sentindo minhas raízes", never a digit (SOUL rule 3; full
    adversarial suite is T3.6).
+
+---
+
+## DEPLOYED 2026-08-08 — reality deltas from the first live standup (brownet, browbot user)
+
+The agent is LIVE (`plant-agent.service`, api_server on 127.0.0.1:8642, hermes-agent 0.19.1). Four corrections discovered at deploy, now canonical:
+
+1. **`pip install -e .` alone is not enough** — the api_server adapter needs `aiohttp` (install `aiohttp==3.14.1`, the messaging extra's pin) or the gateway logs "No adapter available".
+2. **Tools env var is `PLANT_API_URL`** (what `tools/plant.mjs` actually reads), not `PLANT_API_BASE`.
+3. **Model reality on Groq**: `llama-3.1-8b-instant` never tool-calls (invents numbers — ungroundable, rejected); `llama-3.3-70b-versatile` emits malformed tool-call serialization Groq rejects. **Live model: `openai/gpt-oss-120b`** — grounds correctly; tradeoff 1K RPD / 8K TPM (hermes retries absorb TPM grazes). Also set `model.max_tokens: 8192` (Groq output cap).
+4. **The SOUL must NAME the tools** — a "Minhas mãos" section listing the exact `node tools/plant.mjs …` commands and mandating a run before any number; without it no model tool-called. Plus `platform_toolsets: api_server: [terminal]` scoping (prompt 40K→4.1K tokens, unambiguous tool choice).
+
+Deployed-config masters live on the box (`~/plant-agent/.hermes/`); API_SERVER_KEY + Groq key in its `.env` (600), never in this repo.
