@@ -107,7 +107,6 @@ function ParticleFace({ emotion }: { emotion: Emotion }) {
     const [lE0, lE1] = RANGES.leftEye
     const [rE0, rE1] = RANGES.rightEye
     const [m0, m1] = RANGES.mouth
-    const [sp0] = RANGES.sprout
 
     for (let i = 0; i < TOTAL; i++) {
       const idx = i * 3
@@ -135,13 +134,6 @@ function ParticleFace({ emotion }: { emotion: Emotion }) {
       if (mouthPulse !== 1 && i >= m0 && i < m1) {
         y = MOUTH_Y + (y - MOUTH_Y) * mouthPulse
         x = x * (1 + (mouthPulse - 1) * 0.15)
-      }
-      // sprout: gentle independent sway — a slow breeze, tips travel further
-      // than the base (per-emotion droop is baked into the targets, so the
-      // morph lerp already animates the wilt)
-      if (i >= sp0) {
-        const sw = Math.min(Math.max((current[idx + 1] - 1.4) / 0.6, 0), 1)
-        x += Math.sin(t * 0.8 + phase[i] * 0.3) * 0.045 * sw
       }
       // glitch: static jitter, stronger on horizontal scanline bands
       if (glitchAmp > 0) {
@@ -230,7 +222,7 @@ function Dust() {
       </bufferGeometry>
       <pointsMaterial
         size={0.03}
-        color="#2a5a34"
+        color="#1e4a56"
         transparent
         opacity={0.7}
         depthWrite={false}
@@ -244,7 +236,7 @@ function Dust() {
 export function AgentFace({ emotion }: { emotion: Emotion }) {
   return (
     <Canvas
-      camera={{ position: [0, 0.12, 6.1], fov: 42 }}
+      camera={{ position: [0, 0, 5.6], fov: 42 }}
       gl={{ antialias: true, alpha: false }}
       dpr={[1, 2]}
     >

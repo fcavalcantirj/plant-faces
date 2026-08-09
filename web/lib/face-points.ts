@@ -1,12 +1,7 @@
-// Particle face geometry engine — PLANT edition.
+// Particle face geometry engine.
 // Every emotion is expressed as a target point cloud with per-particle colors.
 // The renderer lerps particles from their current position toward the active
 // emotion's targets, producing smooth morph transitions.
-//
-// The creature is a plant (Groot-planter energy): big round puppy eyes, small
-// leaf-tuft brows, a bark/moss head shell with faint vertical striations, and a
-// sprout (stem + leaves) crowning the head. Feature colors keep the emotion hue
-// exactly — mood legibility is product law — the shell and sprout only tint.
 
 export type Emotion =
   | 'neutral'
@@ -42,11 +37,10 @@ export const COUNTS = {
   eye: 420,
   mouth: 660,
   brow: 200,
-  sprout: 350,
 }
 
 export const TOTAL =
-  COUNTS.head + COUNTS.eye * 2 + COUNTS.mouth + COUNTS.brow * 2 + COUNTS.sprout
+  COUNTS.head + COUNTS.eye * 2 + COUNTS.mouth + COUNTS.brow * 2
 
 // Index ranges [start, end) per particle group
 const headStart = 0
@@ -55,7 +49,6 @@ const rightEyeStart = leftEyeStart + COUNTS.eye
 const mouthStart = rightEyeStart + COUNTS.eye
 const leftBrowStart = mouthStart + COUNTS.mouth
 const rightBrowStart = leftBrowStart + COUNTS.brow
-const sproutStart = rightBrowStart + COUNTS.brow
 
 export const RANGES = {
   head: [headStart, leftEyeStart] as const,
@@ -63,17 +56,15 @@ export const RANGES = {
   rightEye: [rightEyeStart, mouthStart] as const,
   mouth: [mouthStart, leftBrowStart] as const,
   leftBrow: [leftBrowStart, rightBrowStart] as const,
-  rightBrow: [rightBrowStart, sproutStart] as const,
-  sprout: [sproutStart, TOTAL] as const,
+  rightBrow: [rightBrowStart, TOTAL] as const,
 }
 
 // Face landmark constants
-export const EYE_X = 0.55
-export const EYE_Y = 0.3
-export const MOUTH_Y = -0.58
-const BROW_Y = 0.66
+export const EYE_X = 0.52
+export const EYE_Y = 0.34
+export const MOUTH_Y = -0.62
+const BROW_Y = 0.64
 const FEATURE_Z = 1.05
-const SPROUT_BASE_Y = 1.45
 
 export interface EmotionMeta {
   label: string
@@ -183,24 +174,6 @@ export const EMOTION_META: Record<Emotion, EmotionMeta> = {
   },
 }
 
-// How far the sprout wilts per emotion (0 = perky, 1 = fully drooped).
-// Baked into each emotion's sprout target positions, so the renderer's
-// existing morph lerp animates the wilt for free.
-const SPROUT_DROOP: Record<Emotion, number> = {
-  neutral: 0,
-  thinking: 0,
-  speaking: 0,
-  happy: 0,
-  alert: 0,
-  sad: 1,
-  angry: 0,
-  surprised: 0,
-  confused: 0.35,
-  sleepy: 0.75,
-  love: 0,
-  glitch: 0.6,
-}
-
 // ---------- sampling helpers ----------
 
 function fillCircle(
@@ -242,7 +215,7 @@ function rimEllipse(
   }
 }
 
-// Quadratic bezier stroke with thickness (mouths)
+// Quadratic bezier stroke with thickness (mouths, brows)
 function bezierStroke(
   out: Float32Array,
   start: number,
@@ -261,58 +234,6 @@ function bezierStroke(
     out[idx] = x + (Math.random() - 0.5) * thickness
     out[idx + 1] = y + (Math.random() - 0.5) * thickness
     out[idx + 2] = FEATURE_Z + (Math.random() - 0.5) * 0.08
-  }
-}
-
-// Leaf-tuft stroke (the brows): a short bezier tapered like a blade — fat at
-// the base, slim at the tip — finished with a small curled tip. Reads as a
-// tiny leaf rather than a human eyebrow, while the control points keep the
-// per-emotion slant semantics (angry tilts in, surprised rides high, ...).
-function leafTuft(
-  out: Float32Array,
-  start: number,
-  count: number,
-  p0: [number, number],
-  c: [number, number],
-  p1: [number, number],
-  thickness: number,
-) {
-  const body = Math.floor(count * 0.82)
-  // tip-curl frame: tangent at p1, plus its upward-facing normal
-  const tx = p1[0] - c[0]
-  const ty = p1[1] - c[1]
-  const len = Math.hypot(tx, ty) || 1
-  const ux = tx / len
-  const uy = ty / len
-  let nx = -uy
-  let ny = ux
-  if (ny < 0) {
-    nx = -nx
-    ny = -ny
-  }
-  const rC = 0.055 // curl radius
-  for (let i = 0; i < count; i++) {
-    const idx = (start + i) * 3
-    if (i < body) {
-      const t = Math.random()
-      const mt = 1 - t
-      const x = mt * mt * p0[0] + 2 * mt * t * c[0] + t * t * p1[0]
-      const y = mt * mt * p0[1] + 2 * mt * t * c[1] + t * t * p1[1]
-      const th = thickness * (1.25 - 0.8 * t) // taper toward the tip
-      out[idx] = x + (Math.random() - 0.5) * th
-      out[idx + 1] = y + (Math.random() - 0.5) * th
-      out[idx + 2] = FEATURE_Z + (Math.random() - 0.5) * 0.08
-    } else {
-      // small arc past the tip, curling upward
-      const a = Math.random() * Math.PI * 0.55
-      const cxA = p1[0] + nx * rC
-      const cyA = p1[1] + ny * rC
-      const x = cxA - nx * Math.cos(a) * rC + ux * Math.sin(a) * rC
-      const y = cyA - ny * Math.cos(a) * rC + uy * Math.sin(a) * rC
-      out[idx] = x + (Math.random() - 0.5) * thickness * 0.5
-      out[idx + 1] = y + (Math.random() - 0.5) * thickness * 0.5
-      out[idx + 2] = FEATURE_Z + (Math.random() - 0.5) * 0.08
-    }
   }
 }
 
@@ -378,63 +299,6 @@ function squiggleStroke(
   }
 }
 
-// 3D bezier stroke with thickness (the sprout stem)
-function stroke3D(
-  out: Float32Array,
-  start: number,
-  count: number,
-  p0: [number, number, number],
-  c: [number, number, number],
-  p1: [number, number, number],
-  thickness: number,
-) {
-  for (let i = 0; i < count; i++) {
-    const t = Math.random()
-    const mt = 1 - t
-    const idx = (start + i) * 3
-    out[idx] =
-      mt * mt * p0[0] + 2 * mt * t * c[0] + t * t * p1[0] + (Math.random() - 0.5) * thickness
-    out[idx + 1] =
-      mt * mt * p0[1] + 2 * mt * t * c[1] + t * t * p1[1] + (Math.random() - 0.5) * thickness
-    out[idx + 2] =
-      mt * mt * p0[2] + 2 * mt * t * c[2] + t * t * p1[2] + (Math.random() - 0.5) * thickness * 0.6
-  }
-}
-
-// Leaf blade on a tilted plane: particles fill a pointed-oval silhouette along
-// a 3D bezier spine; lateral offset also shifts z so the blade leans in space.
-function leafBlade(
-  out: Float32Array,
-  start: number,
-  count: number,
-  base: [number, number, number],
-  ctrl: [number, number, number],
-  tip: [number, number, number],
-  width: number,
-  tilt: number,
-) {
-  for (let i = 0; i < count; i++) {
-    const t = Math.random()
-    const mt = 1 - t
-    const x = mt * mt * base[0] + 2 * mt * t * ctrl[0] + t * t * tip[0]
-    const y = mt * mt * base[1] + 2 * mt * t * ctrl[1] + t * t * tip[1]
-    const z = mt * mt * base[2] + 2 * mt * t * ctrl[2] + t * t * tip[2]
-    // spine tangent in the xy plane -> lateral normal
-    const tx = 2 * mt * (ctrl[0] - base[0]) + 2 * t * (tip[0] - ctrl[0])
-    const ty = 2 * mt * (ctrl[1] - base[1]) + 2 * t * (tip[1] - ctrl[1])
-    const len = Math.hypot(tx, ty) || 1
-    const nx = -ty / len
-    const ny = tx / len
-    // pointed at both ends, widest mid-blade
-    const w = Math.sin(Math.PI * Math.pow(t, 0.85)) * width
-    const off = (Math.random() * 2 - 1) * w
-    const idx = (start + i) * 3
-    out[idx] = x + nx * off
-    out[idx + 1] = y + ny * off
-    out[idx + 2] = z + off * tilt + (Math.random() - 0.5) * 0.03
-  }
-}
-
 // ---------- head shell (shared across all emotions) ----------
 
 let headCache: Float32Array | null = null
@@ -466,29 +330,6 @@ function getHeadShell(): Float32Array {
   return out
 }
 
-// ---------- sprout (shared geometry; droop is applied per emotion) ----------
-
-let sproutCache: Float32Array | null = null
-
-function getSprout(): Float32Array {
-  if (sproutCache) return sproutCache
-  const out = new Float32Array(COUNTS.sprout * 3)
-  const stem = 110
-  const leafL = 105
-  const leafR = 105
-  const leafT = COUNTS.sprout - stem - leafL - leafR
-  // stem: slight S-curve rising off the crown
-  stroke3D(out, 0, stem, [0.02, 1.44, 0.3], [-0.09, 1.66, 0.34], [0.0, 1.86, 0.3], 0.05)
-  // left leaf leans left, blade plane tilted toward the camera
-  leafBlade(out, stem, leafL, [-0.01, 1.8, 0.31], [-0.26, 1.94, 0.38], [-0.46, 2.02, 0.44], 0.1, 0.55)
-  // right leaf leans right, slightly higher, tilted away
-  leafBlade(out, stem + leafL, leafR, [0.02, 1.84, 0.28], [0.26, 2.0, 0.22], [0.44, 2.06, 0.16], 0.095, -0.55)
-  // baby top leaf
-  leafBlade(out, stem + leafL + leafR, leafT, [0.0, 1.86, 0.3], [-0.03, 2.0, 0.31], [-0.05, 2.1, 0.32], 0.055, 0.2)
-  sproutCache = out
-  return out
-}
-
 // ---------- per-emotion targets ----------
 
 export interface EmotionTargets {
@@ -510,177 +351,137 @@ export function buildTargets(emotion: Emotion): EmotionTargets {
   const [m] = RANGES.mouth
   const [lB] = RANGES.leftBrow
   const [rB] = RANGES.rightBrow
-  const [sp] = RANGES.sprout
-
-  // sprout: same geometry for every emotion, wilted by the emotion's droop
-  positions.set(getSprout(), sp * 3)
-  const droop = SPROUT_DROOP[emotion]
-  if (droop > 0) {
-    for (let i = sp; i < TOTAL; i++) {
-      const idx = i * 3
-      const h = Math.max(0, positions[idx + 1] - SPROUT_BASE_Y)
-      const w = Math.min(h / 0.65, 1)
-      positions[idx + 1] -= droop * 0.28 * w * w // leaf tips wilt down
-      positions[idx] *= 1 + droop * 0.06 * w // and splay slightly outward
-    }
-  }
 
   switch (emotion) {
     case 'neutral': {
-      fillCircle(positions, lE, COUNTS.eye, -EYE_X, EYE_Y, 0.24)
-      fillCircle(positions, rE, COUNTS.eye, EYE_X, EYE_Y, 0.24)
-      bezierStroke(positions, m, COUNTS.mouth, [-0.34, -0.56], [0, -0.64], [0.34, -0.56], 0.07)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y - 0.02], [-EYE_X, BROW_Y + 0.06], [-EYE_X + 0.17, BROW_Y - 0.02], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y - 0.02], [EYE_X, BROW_Y + 0.06], [EYE_X + 0.17, BROW_Y - 0.02], 0.075)
+      fillCircle(positions, lE, COUNTS.eye, -EYE_X, EYE_Y, 0.17)
+      fillCircle(positions, rE, COUNTS.eye, EYE_X, EYE_Y, 0.17)
+      bezierStroke(positions, m, COUNTS.mouth, [-0.34, -0.6], [0, -0.68], [0.34, -0.6], 0.07)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y - 0.02], [-EYE_X, BROW_Y + 0.06], [-EYE_X + 0.24, BROW_Y - 0.02], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y - 0.02], [EYE_X, BROW_Y + 0.06], [EYE_X + 0.24, BROW_Y - 0.02], 0.05)
       break
     }
     case 'thinking': {
-      // eyes drift up-right, one tuft raised
-      fillCircle(positions, lE, COUNTS.eye, -EYE_X + 0.09, EYE_Y + 0.08, 0.17)
-      fillCircle(positions, rE, COUNTS.eye, EYE_X + 0.09, EYE_Y + 0.08, 0.17)
-      bezierStroke(positions, m, COUNTS.mouth, [-0.06, -0.56], [0.12, -0.59], [0.3, -0.54], 0.06)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y + 0.1], [-EYE_X, BROW_Y + 0.22], [-EYE_X + 0.17, BROW_Y + 0.08], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y - 0.05], [EYE_X, BROW_Y - 0.01], [EYE_X + 0.17, BROW_Y - 0.05], 0.075)
+      // eyes drift up-right, one brow raised
+      fillCircle(positions, lE, COUNTS.eye, -EYE_X + 0.09, EYE_Y + 0.08, 0.12)
+      fillCircle(positions, rE, COUNTS.eye, EYE_X + 0.09, EYE_Y + 0.08, 0.12)
+      bezierStroke(positions, m, COUNTS.mouth, [-0.06, -0.6], [0.12, -0.63], [0.3, -0.58], 0.06)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y + 0.1], [-EYE_X, BROW_Y + 0.22], [-EYE_X + 0.24, BROW_Y + 0.08], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y - 0.05], [EYE_X, BROW_Y - 0.01], [EYE_X + 0.24, BROW_Y - 0.05], 0.05)
       break
     }
     case 'speaking': {
-      fillCircle(positions, lE, COUNTS.eye, -EYE_X, EYE_Y, 0.21)
-      fillCircle(positions, rE, COUNTS.eye, EYE_X, EYE_Y, 0.21)
+      fillCircle(positions, lE, COUNTS.eye, -EYE_X, EYE_Y, 0.15)
+      fillCircle(positions, rE, COUNTS.eye, EYE_X, EYE_Y, 0.15)
       rimEllipse(positions, m, COUNTS.mouth, 0, MOUTH_Y, 0.24, 0.16)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y - 0.02], [-EYE_X, BROW_Y + 0.06], [-EYE_X + 0.17, BROW_Y - 0.02], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y - 0.02], [EYE_X, BROW_Y + 0.06], [EYE_X + 0.17, BROW_Y - 0.02], 0.075)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y - 0.02], [-EYE_X, BROW_Y + 0.06], [-EYE_X + 0.24, BROW_Y - 0.02], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y - 0.02], [EYE_X, BROW_Y + 0.06], [EYE_X + 0.24, BROW_Y - 0.02], 0.05)
       break
     }
     case 'happy': {
       // closed crescent eyes + wide smile
-      arcStroke(positions, lE, COUNTS.eye, -EYE_X, EYE_Y - 0.07, 0.25, Math.PI * 0.15, Math.PI * 0.85, 0.07)
-      arcStroke(positions, rE, COUNTS.eye, EYE_X, EYE_Y - 0.07, 0.25, Math.PI * 0.15, Math.PI * 0.85, 0.07)
-      bezierStroke(positions, m, COUNTS.mouth, [-0.44, -0.46], [0, -0.88], [0.44, -0.46], 0.08)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y + 0.06], [-EYE_X, BROW_Y + 0.16], [-EYE_X + 0.17, BROW_Y + 0.06], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y + 0.06], [EYE_X, BROW_Y + 0.16], [EYE_X + 0.17, BROW_Y + 0.06], 0.075)
+      arcStroke(positions, lE, COUNTS.eye, -EYE_X, EYE_Y - 0.06, 0.18, Math.PI * 0.15, Math.PI * 0.85, 0.06)
+      arcStroke(positions, rE, COUNTS.eye, EYE_X, EYE_Y - 0.06, 0.18, Math.PI * 0.15, Math.PI * 0.85, 0.06)
+      bezierStroke(positions, m, COUNTS.mouth, [-0.44, -0.5], [0, -0.92], [0.44, -0.5], 0.08)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y + 0.06], [-EYE_X, BROW_Y + 0.16], [-EYE_X + 0.24, BROW_Y + 0.06], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y + 0.06], [EYE_X, BROW_Y + 0.16], [EYE_X + 0.24, BROW_Y + 0.06], 0.05)
       break
     }
     case 'alert': {
-      // wide ringed eyes with pupils, small open mouth, tufts high
+      // wide ringed eyes with pupils, small open mouth, brows high
       const pupil = Math.floor(COUNTS.eye * 0.3)
-      rimEllipse(positions, lE, COUNTS.eye - pupil, -EYE_X, EYE_Y, 0.3, 0.3, 0.25)
-      fillCircle(positions, lE + COUNTS.eye - pupil, pupil, -EYE_X, EYE_Y, 0.11)
-      rimEllipse(positions, rE, COUNTS.eye - pupil, EYE_X, EYE_Y, 0.3, 0.3, 0.25)
-      fillCircle(positions, rE + COUNTS.eye - pupil, pupil, EYE_X, EYE_Y, 0.11)
+      rimEllipse(positions, lE, COUNTS.eye - pupil, -EYE_X, EYE_Y, 0.24, 0.24, 0.25)
+      fillCircle(positions, lE + COUNTS.eye - pupil, pupil, -EYE_X, EYE_Y, 0.08)
+      rimEllipse(positions, rE, COUNTS.eye - pupil, EYE_X, EYE_Y, 0.24, 0.24, 0.25)
+      fillCircle(positions, rE + COUNTS.eye - pupil, pupil, EYE_X, EYE_Y, 0.08)
       rimEllipse(positions, m, COUNTS.mouth, 0, MOUTH_Y - 0.02, 0.11, 0.13, 0.2)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.19, BROW_Y + 0.08], [-EYE_X, BROW_Y + 0.2], [-EYE_X + 0.19, BROW_Y + 0.12], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.19, BROW_Y + 0.12], [EYE_X, BROW_Y + 0.2], [EYE_X + 0.19, BROW_Y + 0.08], 0.075)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.26, BROW_Y + 0.08], [-EYE_X, BROW_Y + 0.2], [-EYE_X + 0.26, BROW_Y + 0.12], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.26, BROW_Y + 0.12], [EYE_X, BROW_Y + 0.2], [EYE_X + 0.26, BROW_Y + 0.08], 0.05)
       break
     }
     case 'sad': {
-      // downcast eyes with a tear under the left one, inner-raised tufts, frown
+      // downcast small eyes with a tear under the left one, inner-raised brows, frown
       const tear = Math.floor(COUNTS.eye * 0.14)
-      fillCircle(positions, lE, COUNTS.eye - tear, -EYE_X, EYE_Y - 0.05, 0.18)
-      fillCircle(positions, lE + COUNTS.eye - tear, tear, -EYE_X - 0.08, EYE_Y - 0.52, 0.06)
-      fillCircle(positions, rE, COUNTS.eye, EYE_X, EYE_Y - 0.05, 0.18)
-      bezierStroke(positions, m, COUNTS.mouth, [-0.3, -0.64], [0, -0.44], [0.3, -0.64], 0.07)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y - 0.06], [-EYE_X, BROW_Y + 0.04], [-EYE_X + 0.17, BROW_Y + 0.12], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y + 0.12], [EYE_X, BROW_Y + 0.04], [EYE_X + 0.17, BROW_Y - 0.06], 0.075)
+      fillCircle(positions, lE, COUNTS.eye - tear, -EYE_X, EYE_Y - 0.05, 0.13)
+      fillCircle(positions, lE + COUNTS.eye - tear, tear, -EYE_X - 0.06, EYE_Y - 0.38, 0.05)
+      fillCircle(positions, rE, COUNTS.eye, EYE_X, EYE_Y - 0.05, 0.13)
+      bezierStroke(positions, m, COUNTS.mouth, [-0.3, -0.68], [0, -0.48], [0.3, -0.68], 0.07)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y - 0.06], [-EYE_X, BROW_Y + 0.04], [-EYE_X + 0.24, BROW_Y + 0.12], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y + 0.12], [EYE_X, BROW_Y + 0.04], [EYE_X + 0.24, BROW_Y - 0.06], 0.05)
       break
     }
     case 'angry': {
-      // narrowed eyes, steep inward-slanted tufts, tight downturned mouth
-      rimEllipse(positions, lE, COUNTS.eye, -EYE_X, EYE_Y, 0.26, 0.1, 0.6)
-      rimEllipse(positions, rE, COUNTS.eye, EYE_X, EYE_Y, 0.26, 0.1, 0.6)
-      bezierStroke(positions, m, COUNTS.mouth, [-0.26, -0.56], [0, -0.52], [0.26, -0.56], 0.06)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.19, BROW_Y + 0.1], [-EYE_X, BROW_Y - 0.02], [-EYE_X + 0.17, BROW_Y - 0.14], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y - 0.14], [EYE_X, BROW_Y - 0.02], [EYE_X + 0.19, BROW_Y + 0.1], 0.075)
+      // narrowed eyes, steep inward-slanted brows, tight downturned mouth
+      rimEllipse(positions, lE, COUNTS.eye, -EYE_X, EYE_Y, 0.19, 0.07, 0.6)
+      rimEllipse(positions, rE, COUNTS.eye, EYE_X, EYE_Y, 0.19, 0.07, 0.6)
+      bezierStroke(positions, m, COUNTS.mouth, [-0.26, -0.6], [0, -0.56], [0.26, -0.6], 0.06)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.26, BROW_Y + 0.1], [-EYE_X, BROW_Y - 0.02], [-EYE_X + 0.24, BROW_Y - 0.14], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y - 0.14], [EYE_X, BROW_Y - 0.02], [EYE_X + 0.26, BROW_Y + 0.1], 0.05)
       break
     }
     case 'surprised': {
-      // huge ringed eyes with tiny pupils, sky-high tufts, big O mouth
+      // huge ringed eyes with tiny pupils, sky-high brows, big O mouth
       const pupil = Math.floor(COUNTS.eye * 0.22)
-      rimEllipse(positions, lE, COUNTS.eye - pupil, -EYE_X, EYE_Y + 0.03, 0.33, 0.35, 0.22)
-      fillCircle(positions, lE + COUNTS.eye - pupil, pupil, -EYE_X, EYE_Y + 0.03, 0.08)
-      rimEllipse(positions, rE, COUNTS.eye - pupil, EYE_X, EYE_Y + 0.03, 0.33, 0.35, 0.22)
-      fillCircle(positions, rE + COUNTS.eye - pupil, pupil, EYE_X, EYE_Y + 0.03, 0.08)
+      rimEllipse(positions, lE, COUNTS.eye - pupil, -EYE_X, EYE_Y + 0.03, 0.27, 0.29, 0.22)
+      fillCircle(positions, lE + COUNTS.eye - pupil, pupil, -EYE_X, EYE_Y + 0.03, 0.06)
+      rimEllipse(positions, rE, COUNTS.eye - pupil, EYE_X, EYE_Y + 0.03, 0.27, 0.29, 0.22)
+      fillCircle(positions, rE + COUNTS.eye - pupil, pupil, EYE_X, EYE_Y + 0.03, 0.06)
       rimEllipse(positions, m, COUNTS.mouth, 0, MOUTH_Y - 0.04, 0.17, 0.22, 0.25)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.19, BROW_Y + 0.16], [-EYE_X, BROW_Y + 0.3], [-EYE_X + 0.19, BROW_Y + 0.16], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.19, BROW_Y + 0.16], [EYE_X, BROW_Y + 0.3], [EYE_X + 0.19, BROW_Y + 0.16], 0.075)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.26, BROW_Y + 0.16], [-EYE_X, BROW_Y + 0.3], [-EYE_X + 0.26, BROW_Y + 0.16], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.26, BROW_Y + 0.16], [EYE_X, BROW_Y + 0.3], [EYE_X + 0.26, BROW_Y + 0.16], 0.05)
       break
     }
     case 'confused': {
-      // asymmetric everything: one wide eye, one squint, mismatched tufts, squiggle mouth
-      fillCircle(positions, lE, COUNTS.eye, -EYE_X, EYE_Y + 0.05, 0.28)
-      rimEllipse(positions, rE, COUNTS.eye, EYE_X, EYE_Y - 0.02, 0.21, 0.1, 0.6)
+      // asymmetric everything: one wide eye, one squint, mismatched brows, squiggle mouth
+      fillCircle(positions, lE, COUNTS.eye, -EYE_X, EYE_Y + 0.05, 0.2)
+      rimEllipse(positions, rE, COUNTS.eye, EYE_X, EYE_Y - 0.02, 0.15, 0.07, 0.6)
       squiggleStroke(positions, m, COUNTS.mouth, 0.02, MOUTH_Y + 0.02, 0.3, 0.05, 0.06)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y + 0.14], [-EYE_X, BROW_Y + 0.26], [-EYE_X + 0.17, BROW_Y + 0.12], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y - 0.08], [EYE_X, BROW_Y - 0.06], [EYE_X + 0.17, BROW_Y - 0.08], 0.075)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y + 0.14], [-EYE_X, BROW_Y + 0.26], [-EYE_X + 0.24, BROW_Y + 0.12], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y - 0.08], [EYE_X, BROW_Y - 0.06], [EYE_X + 0.24, BROW_Y - 0.08], 0.05)
       break
     }
     case 'sleepy': {
-      // heavy half-closed lids, relaxed low tufts, small slack mouth
-      arcStroke(positions, lE, COUNTS.eye, -EYE_X, EYE_Y + 0.08, 0.24, Math.PI * 1.15, Math.PI * 1.85, 0.07)
-      arcStroke(positions, rE, COUNTS.eye, EYE_X, EYE_Y + 0.08, 0.24, Math.PI * 1.15, Math.PI * 1.85, 0.07)
+      // heavy half-closed lids, relaxed low brows, small slack mouth
+      arcStroke(positions, lE, COUNTS.eye, -EYE_X, EYE_Y + 0.08, 0.17, Math.PI * 1.15, Math.PI * 1.85, 0.06)
+      arcStroke(positions, rE, COUNTS.eye, EYE_X, EYE_Y + 0.08, 0.17, Math.PI * 1.15, Math.PI * 1.85, 0.06)
       rimEllipse(positions, m, COUNTS.mouth, 0, MOUTH_Y, 0.1, 0.08, 0.4)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y - 0.12], [-EYE_X, BROW_Y - 0.08], [-EYE_X + 0.17, BROW_Y - 0.12], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y - 0.12], [EYE_X, BROW_Y - 0.08], [EYE_X + 0.17, BROW_Y - 0.12], 0.075)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y - 0.12], [-EYE_X, BROW_Y - 0.08], [-EYE_X + 0.24, BROW_Y - 0.12], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y - 0.12], [EYE_X, BROW_Y - 0.08], [EYE_X + 0.24, BROW_Y - 0.12], 0.05)
       break
     }
     case 'love': {
       // heart-shaped eyes + warm smile
-      heartStroke(positions, lE, COUNTS.eye, -EYE_X, EYE_Y, 0.016, 0.06)
-      heartStroke(positions, rE, COUNTS.eye, EYE_X, EYE_Y, 0.016, 0.06)
-      bezierStroke(positions, m, COUNTS.mouth, [-0.38, -0.5], [0, -0.8], [0.38, -0.5], 0.08)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y + 0.04], [-EYE_X, BROW_Y + 0.14], [-EYE_X + 0.17, BROW_Y + 0.04], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y + 0.04], [EYE_X, BROW_Y + 0.14], [EYE_X + 0.17, BROW_Y + 0.04], 0.075)
+      heartStroke(positions, lE, COUNTS.eye, -EYE_X, EYE_Y, 0.0115, 0.05)
+      heartStroke(positions, rE, COUNTS.eye, EYE_X, EYE_Y, 0.0115, 0.05)
+      bezierStroke(positions, m, COUNTS.mouth, [-0.38, -0.54], [0, -0.84], [0.38, -0.54], 0.08)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y + 0.04], [-EYE_X, BROW_Y + 0.14], [-EYE_X + 0.24, BROW_Y + 0.04], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y + 0.04], [EYE_X, BROW_Y + 0.14], [EYE_X + 0.24, BROW_Y + 0.04], 0.05)
       break
     }
     case 'glitch': {
-      // X-ed out eyes, flatlined mouth, skewed tufts — signal lost
+      // X-ed out eyes, flatlined mouth, skewed brows — signal lost
       const half = Math.floor(COUNTS.eye / 2)
-      bezierStroke(positions, lE, half, [-EYE_X - 0.21, EYE_Y + 0.21], [-EYE_X, EYE_Y], [-EYE_X + 0.21, EYE_Y - 0.21], 0.05)
-      bezierStroke(positions, lE + half, COUNTS.eye - half, [-EYE_X - 0.21, EYE_Y - 0.21], [-EYE_X, EYE_Y], [-EYE_X + 0.21, EYE_Y + 0.21], 0.05)
-      bezierStroke(positions, rE, half, [EYE_X - 0.21, EYE_Y + 0.21], [EYE_X, EYE_Y], [EYE_X + 0.21, EYE_Y - 0.21], 0.05)
-      bezierStroke(positions, rE + half, COUNTS.eye - half, [EYE_X - 0.21, EYE_Y - 0.21], [EYE_X, EYE_Y], [EYE_X + 0.21, EYE_Y + 0.21], 0.05)
+      bezierStroke(positions, lE, half, [-EYE_X - 0.15, EYE_Y + 0.15], [-EYE_X, EYE_Y], [-EYE_X + 0.15, EYE_Y - 0.15], 0.05)
+      bezierStroke(positions, lE + half, COUNTS.eye - half, [-EYE_X - 0.15, EYE_Y - 0.15], [-EYE_X, EYE_Y], [-EYE_X + 0.15, EYE_Y + 0.15], 0.05)
+      bezierStroke(positions, rE, half, [EYE_X - 0.15, EYE_Y + 0.15], [EYE_X, EYE_Y], [EYE_X + 0.15, EYE_Y - 0.15], 0.05)
+      bezierStroke(positions, rE + half, COUNTS.eye - half, [EYE_X - 0.15, EYE_Y - 0.15], [EYE_X, EYE_Y], [EYE_X + 0.15, EYE_Y + 0.15], 0.05)
       bezierStroke(positions, m, COUNTS.mouth, [-0.34, MOUTH_Y], [0, MOUTH_Y], [0.34, MOUTH_Y], 0.05)
-      leafTuft(positions, lB, COUNTS.brow, [-EYE_X - 0.17, BROW_Y + 0.02], [-EYE_X, BROW_Y + 0.04], [-EYE_X + 0.17, BROW_Y - 0.04], 0.075)
-      leafTuft(positions, rB, COUNTS.brow, [EYE_X - 0.17, BROW_Y - 0.04], [EYE_X, BROW_Y + 0.04], [EYE_X + 0.17, BROW_Y + 0.02], 0.075)
+      bezierStroke(positions, lB, COUNTS.brow, [-EYE_X - 0.24, BROW_Y + 0.02], [-EYE_X, BROW_Y + 0.04], [-EYE_X + 0.24, BROW_Y - 0.04], 0.05)
+      bezierStroke(positions, rB, COUNTS.brow, [EYE_X - 0.24, BROW_Y - 0.04], [EYE_X, BROW_Y + 0.04], [EYE_X + 0.24, BROW_Y + 0.02], 0.05)
       break
     }
   }
 
-  // colors:
-  // - head shell: bark/moss base with faint vertical striations, tinted 40% by
-  //   the emotion color so the whole face still warms/cools with mood
-  // - sprout: emotion hue leaning green (55% emotion + 45% leaf green)
-  // - features (eyes/mouth/tufts): the emotion hue exactly, with white sparkle
+  // colors: dim head shell, bright features with white sparkle
   const colors = new Float32Array(TOTAL * 3)
   const [r, g, b] = EMOTION_META[emotion].rgb
   for (let i = 0; i < TOTAL; i++) {
     const idx = i * 3
     if (i < COUNTS.head) {
-      const px = positions[idx]
-      const py = positions[idx + 1]
-      const pz = positions[idx + 2]
-      // deterministic per-particle noise from the cached shell position, so
-      // the bark pattern holds steady while emotions morph over it
-      const h1 = Math.sin(px * 12.9898 + py * 78.233 + pz * 37.719) * 43758.5453
-      const mixN = h1 - Math.floor(h1) // bark <-> moss mix
-      const h2 = Math.sin(px * 63.726 + py * 11.135 + pz * 91.532) * 24634.6345
-      const varN = h2 - Math.floor(h2) // brightness variation
-      const baseR = 0.35 * (1 - mixN) + 0.3 * mixN
-      const baseG = 0.28 * (1 - mixN) + 0.45 * mixN
-      const baseB = 0.18 * (1 - mixN) + 0.22 * mixN
-      // faint vertical bark stripes
-      const stripe = 0.75 + 0.25 * Math.sin(Math.atan2(px, pz) * 9 + py * 2)
-      const v = (0.5 + varN * 0.28) * stripe
-      colors[idx] = (baseR * 0.6 + r * 0.4) * v
-      colors[idx + 1] = (baseG * 0.6 + g * 0.4) * v
-      colors[idx + 2] = (baseB * 0.6 + b * 0.4) * v
-    } else if (i >= sproutStart) {
-      const sr = r * 0.55 + 0.35 * 0.45
-      const sg = g * 0.55 + 0.75 * 0.45
-      const sb = b * 0.55 + 0.3 * 0.45
-      const w = Math.random() * 0.22 // white mix for sparkle
-      colors[idx] = sr + (1 - sr) * w
-      colors[idx + 1] = sg + (1 - sg) * w
-      colors[idx + 2] = sb + (1 - sb) * w
+      const v = 0.22 + Math.random() * 0.14
+      colors[idx] = r * v
+      colors[idx + 1] = g * v
+      colors[idx + 2] = b * v
     } else {
       const w = Math.random() * 0.22 // white mix for sparkle
       colors[idx] = r + (1 - r) * w
