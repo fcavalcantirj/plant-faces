@@ -24,3 +24,4 @@ node_modules
 # firmware — real secrets and ESPHome build cache stay on the desk
 firmware/secrets.yaml
 firmware/.esphome/
+HANDOVER.md
